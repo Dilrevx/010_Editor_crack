@@ -1,0 +1,128 @@
+//------------------------------------------------
+//--- 010 Editor v15.0.1 Binary Template
+//
+//      File: 
+//   Authors: 
+//   Version: 
+//   Purpose: 
+//  Category: 
+// File Mask: 
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+// ubi.bt - 010 Editor template for UBI EC / VID headers
+// Usage: open a PEB image (or .ubi) and run this template.
+// It reads an EC header at offset 0x0 and a VID header at ec.vid_hdr_offset.
+
+// LittleEndian();  // UBI is little-endian on NAND
+BigEndian();
+
+struct UBI_EC_Header  
+{
+    char    magic[4];          // "UBI#"
+    uint8   version;           // version (usually 0x01)
+    uint8   reserved1[3];      // padding / reserved
+    uint64  ec;                // erase counter (8 bytes)
+    uint32  vid_hdr_offset;    // where the VID header starts (usually 0x200)
+    uint32  data_offset;       // where user data starts (e.g. 0x800)
+    uint32  image_seq;         // image sequence number
+    uint8   reserved2[32];     // reserved / zeros
+    uint32  hdr_crc;           // EC header CRC
+};
+
+struct UBI_VID_Header
+{
+    char    magic[4];          // "UBI!"
+    uint8   version;           // version (usually 0x01)
+    uint8   vol_type;          // volume type (static/dynamic)
+    uint8   copy_flag;         // copy flag
+    uint8   compat;            // compatibility flags
+    int32   vol_id;            // volume id (-1 for free/empty)
+    uint32  lnum;              // logical eraseblock number in the volume
+    uint32  leb_ver;           // leb version
+    uint32  data_size;         // how many bytes of data in this LEB
+    uint32  used_ebs;          // total used logical eraseblocks in this volume
+    uint32  reserved1;         // reserved / zeros
+    uint32  data_crc;          // CRC of data in this logical eraseblock
+    uint32  reserved2;         // reserved / zeros
+    uint64  sqnum;             // sequence number (64-bit)
+    uint8   reserved3[12];     // reserved / zeros
+    uint32  hdr_crc;           // VID header CRC
+};
+
+local uint32 magic_ec = 0x55424923; // "UBI#"
+local uint32 magic_vid = 0x55424921; // "UBI!"
+
+
+
+// Hex dump preview function
+void DumpContext(int64 pos)
+{
+    /*FSeek(pos);
+    local int dump_len = 128;
+    Printf("  Hex dump @0x%08X (first %d bytes):\n", pos, dump_len);
+    HexDump(pos, dump_len, 16);*/
+}
+
+// ---------------------- MAIN SCAN LOGIC ----------------------
+
+Printf("Scanning for UBI headers in file:\n");
+Printf("WARNING: This script assumes 4-byte alignment.");
+
+local int64 pos = 0;
+local uint32 value;
+
+FSeek(pos);
+
+while (!FEof())
+{
+    //if (pos % 0x10000 == 0) Printf("Processing 0x%x\n", pos);
+    
+    // NOTE: 编译器报错 line 74，但是把 line 75 的 FRead(&value, 4); 注释掉就好了，可能编译器的 lineno 是从 0 开始的
+    value = ReadUInt(pos);
+
+    if (value == magic_ec)
+    {
+        Printf("Found EC Header at offset 0x%08X\n", pos);
+        FSeek(pos);
+        UBI_EC_Header ec; 
+
+        Printf("  version:  0x%02X\n", ec.version);
+        Printf("  ec:       (0x%08X)\n", ec.ec);
+        Printf("  vid_off:  0x%X\n", ec.vid_hdr_offset);
+        Printf("  data_off: 0x%X\n", ec.data_offset);
+        Printf("  img_seq:  0x%X\n", ec.image_seq);
+        Printf("  hdr_crc:  0x%X\n", ec.hdr_crc);
+
+        DumpContext(pos);
+
+        // Move past this header to avoid re-detection
+        pos += sizeof(ec);
+        continue;
+    }
+
+    if (value == magic_vid)
+    {
+        Printf("Found VID Header at offset 0x%08X\n", pos);
+        FSeek(pos);
+        UBI_VID_Header vid;
+
+        Printf("  version:  0x%02X\n", vid.version);
+        Printf("  vol_id:   %d (0x%X)\n", vid.vol_id, vid.vol_id);
+        Printf("  lnum:     %u\n", vid.lnum);
+        Printf("  data_size:%u\n", vid.data_size);
+        Printf("  data_crc: 0x%08X\n", vid.data_crc);
+        Printf("  sqnum:    %08u\n", vid.sqnum);
+        Printf("  hdr_crc:  0x%08X\n", vid.hdr_crc);
+
+        DumpContext(pos);
+
+        pos += sizeof(vid);
+        continue;
+    }
+
+    pos+=4;
+    FSeek(pos);
+}
+
+Printf("\nScan complete.\n");
