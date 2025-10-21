@@ -17,9 +17,9 @@
 // LittleEndian();  // UBI is little-endian on NAND
 BigEndian();
 
-struct UBI_EC_Header  
+typedef struct  
 {
-    char    magic[4];          // "UBI#"
+    char    magic[4] <bgcolor=0x0000ff>;          // "UBI#"
     uint8   version;           // version (usually 0x01)
     uint8   reserved1[3];      // padding / reserved
     uint64  ec;                // erase counter (8 bytes)
@@ -28,11 +28,11 @@ struct UBI_EC_Header
     uint32  image_seq;         // image sequence number
     uint8   reserved2[32];     // reserved / zeros
     uint32  hdr_crc;           // EC header CRC
-};
+} UBI_EC_Header <bgcolor=0xff0000>;
 
-struct UBI_VID_Header
+typedef struct 
 {
-    char    magic[4];          // "UBI!"
+    char    magic[4] <bgcolor=0x0000ff>;          // "UBI!"
     uint8   version;           // version (usually 0x01)
     uint8   vol_type;          // volume type (static/dynamic)
     uint8   copy_flag;         // copy flag
@@ -48,7 +48,7 @@ struct UBI_VID_Header
     uint64  sqnum;             // sequence number (64-bit)
     uint8   reserved3[12];     // reserved / zeros
     uint32  hdr_crc;           // VID header CRC
-};
+} UBI_VID_Header <bgcolor=0xf00000>;
 
 local uint32 magic_ec = 0x55424923; // "UBI#"
 local uint32 magic_vid = 0x55424921; // "UBI!"
@@ -98,10 +98,9 @@ while (!FEof())
 
         // Move past this header to avoid re-detection
         pos += sizeof(ec);
-        continue;
     }
 
-    if (value == magic_vid)
+    else if (value == magic_vid)
     {
         Printf("Found VID Header at offset 0x%08X\n", pos);
         FSeek(pos);
@@ -118,10 +117,12 @@ while (!FEof())
         DumpContext(pos);
 
         pos += sizeof(vid);
-        continue;
     }
-
-    pos+=4;
+    
+    else 
+    {
+        pos+=4;
+    }
     FSeek(pos);
 }
 
