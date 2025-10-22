@@ -14,8 +14,31 @@
 // Usage: open a PEB image (or .ubi) and run this template.
 // It reads an EC header at offset 0x0 and a VID header at ec.vid_hdr_offset.
 
-// LittleEndian();  // UBI is little-endian on NAND
+
+// NOTE: 010 hex editor 的 compiler 报错行数是从 0 开始计算的，不是 1
+
+// LittleEndian();  // UBI is big-endian on NAND
 BigEndian();
+
+// 使用数组和索引来模拟指针操作
+uint32 UBI_CRC32(uint8 data[], uint64 length)
+{
+    local uint32 i, j;
+    local uint32 crc = 0xFFFFFFFF;
+    local uint32 byte_, mask;
+    
+    for (i = 0; i < length; i++) 
+    {
+        byte_ = data[i]; // 通过索引访问数组元素，类似指针取值
+        crc = crc ^ byte_;
+        for (j = 0; j < 8; j++) 
+        {
+            mask = -(crc & 1);
+            crc = (crc >> 1) ^ (0xEDB88320 & mask);
+        }
+    }
+    return ~crc;
+}
 
 typedef struct  
 {
@@ -28,7 +51,71 @@ typedef struct
     uint32  image_seq;         // image sequence number
     uint8   reserved2[32];     // reserved / zeros
     uint32  hdr_crc;           // EC header CRC
-} UBI_EC_Header <bgcolor=0xff0000>;
+} UBI_EC_Header <bgcolor=0xff0000, read=ReadECHeader>;
+
+string ReadECHeader( UBI_EC_Header& hdr )
+{
+    uint8 data[sizeof(UBI_EC_Header) - 4];
+    local uint32 i;
+    
+    for (i = 0; i < 4; i++) {
+        data[i] = hdr.magic[i];
+    }
+    
+    // 复制 version (1 byte)
+    data[4] = hdr.version;
+    
+    // 复制 reserved1 (3 bytes)
+    for (i = 0; i < 3; i++) {
+        data[5 + i] = hdr.reserved1[i];
+    }
+    
+    // 复制 ec (8 bytes) - 注意字节序
+    local uint64 ec = hdr.ec;
+    for (i = 0; i < 8; i++) {
+        data[8 + i] = (ec >> (56 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 vid_hdr_offset (4 bytes)
+    local uint32 vid_off = hdr.vid_hdr_offset;
+    for (i = 0; i < 4; i++) {
+        data[16 + i] = (vid_off >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 data_offset (4 bytes)
+    local uint32 data_off = hdr.data_offset;
+    for (i = 0; i < 4; i++) {
+        data[20 + i] = (data_off >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 image_seq (4 bytes)
+    local uint32 img_seq = hdr.image_seq;
+    for (i = 0; i < 4; i++) {
+        data[24 + i] = (img_seq >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 reserved2 (32 bytes)
+    for (i = 0; i < 32; i++) {
+        data[28 + i] = hdr.reserved2[i];
+    }
+    
+    
+    /* Printf("data array contents:\n");
+    
+    for (i = 0; i < sizeof(data); i++) {
+        if (i % 16 == 0) Printf("\n0x%04X: ", i);
+        Printf("%02X ", data[i]);
+    }
+    Printf("\n");    
+    */
+    
+    uint32 calc_crc = ~UBI_CRC32(data, sizeof(UBI_EC_Header) -4);
+    string result;
+    SPrintf(result, "hdr_crc=0x%08X (calc=0x%08X) %s",
+        hdr.hdr_crc, calc_crc,
+        hdr.hdr_crc == calc_crc ? "[OK]" : "[BAD]");
+    return result;
+}
 
 typedef struct 
 {
@@ -48,28 +135,122 @@ typedef struct
     uint64  sqnum;             // sequence number (64-bit)
     uint8   reserved3[12];     // reserved / zeros
     uint32  hdr_crc;           // VID header CRC
-} UBI_VID_Header <bgcolor=0xf00000>;
+} UBI_VID_Header <bgcolor=0xf00000, read=ReadVIDHeader>;
+
+string ReadVIDHeader(UBI_VID_Header& hdr)
+{
+    uint8 data[sizeof(UBI_VID_Header) - 4];
+    local uint32 i;
+    
+    // 复制 magic (4 bytes)
+    for (i = 0; i < 4; i++) {
+        data[i] = hdr.magic[i];
+    }
+    
+    // 复制 version (1 byte)
+    data[4] = hdr.version;
+    
+    // 复制 vol_type (1 byte)
+    data[5] = hdr.vol_type;
+    
+    // 复制 copy_flag (1 byte)
+    data[6] = hdr.copy_flag;
+    
+    // 复制 compat (1 byte)
+    data[7] = hdr.compat;
+    
+    // 复制 vol_id (4 bytes) - 注意字节序
+    local int32 vol_id = hdr.vol_id;
+    for (i = 0; i < 4; i++) {
+        data[8 + i] = (vol_id >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 lnum (4 bytes)
+    local uint32 lnum = hdr.lnum;
+    for (i = 0; i < 4; i++) {
+        data[12 + i] = (lnum >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 leb_ver (4 bytes)
+    local uint32 leb_ver = hdr.leb_ver;
+    for (i = 0; i < 4; i++) {
+        data[16 + i] = (leb_ver >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 data_size (4 bytes)
+    local uint32 data_size = hdr.data_size;
+    for (i = 0; i < 4; i++) {
+        data[20 + i] = (data_size >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 used_ebs (4 bytes)
+    local uint32 used_ebs = hdr.used_ebs;
+    for (i = 0; i < 4; i++) {
+        data[24 + i] = (used_ebs >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 reserved1 (4 bytes)
+    local uint32 reserved1 = hdr.reserved1;
+    for (i = 0; i < 4; i++) {
+        data[28 + i] = (reserved1 >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 data_crc (4 bytes)
+    local uint32 data_crc = hdr.data_crc;
+    for (i = 0; i < 4; i++) {
+        data[32 + i] = (data_crc >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 reserved2 (4 bytes)
+    local uint32 reserved2 = hdr.reserved2;
+    for (i = 0; i < 4; i++) {
+        data[36 + i] = (reserved2 >> (24 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 sqnum (8 bytes) - 注意字节序
+    local uint64 sqnum = hdr.sqnum;
+    for (i = 0; i < 8; i++) {
+        data[40 + i] = (sqnum >> (56 - i * 8)) & 0xFF;
+    }
+    
+    // 复制 reserved3 (12 bytes)
+    for (i = 0; i < 12; i++) {
+        data[48 + i] = hdr.reserved3[i];
+    }
+    
+    /* 
+    Printf("data array contents:\n");
+    
+    for (i = 0; i < sizeof(data); i++) {
+        if (i % 16 == 0) Printf("\n0x%04X: ", i);
+        Printf("%02X ", data[i]);
+    }
+    Printf("\n");    
+    */
+    
+    
+    // 计算 CRC
+    uint32 calc_crc = ~UBI_CRC32(data, sizeof(UBI_VID_Header) - 4);
+    
+    string result;
+    SPrintf(result, "hdr_crc=0x%08X (calc=0x%08X) %s",
+        hdr.hdr_crc, calc_crc,
+        hdr.hdr_crc == calc_crc ? "[OK]" : "[BAD]");
+    return result;
+}
 
 local uint32 magic_ec = 0x55424923; // "UBI#"
 local uint32 magic_vid = 0x55424921; // "UBI!"
 
-
-
-// Hex dump preview function
-void DumpContext(int64 pos)
-{
-    /*FSeek(pos);
-    local int dump_len = 128;
-    Printf("  Hex dump @0x%08X (first %d bytes):\n", pos, dump_len);
-    HexDump(pos, dump_len, 16);*/
-}
+// Printf("Debug: CRC32 0x%x", UBI_CRC32("hello world", 11));
+// pos = 0x1000000000;
 
 // ---------------------- MAIN SCAN LOGIC ----------------------
 
 Printf("Scanning for UBI headers in file:\n");
 Printf("WARNING: This script assumes 4-byte alignment.");
 
-local int64 pos = 0;
+local int64 pos = 0; // 0x10F34000; // 0x3520000;
 local uint32 value;
 
 FSeek(pos);
@@ -94,9 +275,6 @@ while (!FEof())
         Printf("  img_seq:  0x%X\n", ec.image_seq);
         Printf("  hdr_crc:  0x%X\n", ec.hdr_crc);
 
-        DumpContext(pos);
-
-        // Move past this header to avoid re-detection
         pos += sizeof(ec);
     }
 
@@ -114,14 +292,12 @@ while (!FEof())
         Printf("  sqnum:    %08u\n", vid.sqnum);
         Printf("  hdr_crc:  0x%08X\n", vid.hdr_crc);
 
-        DumpContext(pos);
-
         pos += sizeof(vid);
     }
     
     else 
     {
-        pos+=4;
+        pos += 4;
     }
     FSeek(pos);
 }
